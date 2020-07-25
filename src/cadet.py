@@ -1,23 +1,23 @@
 #!/usr/bin/env python
 """
-This CLI tool allows a user to upload CSV and TSV files to an Azure CosmosDB instance configured
-to use DocumentDB.
+This CLI tool allows a user to upload CSV, TSV, & JSON files to an Azure CosmosDB instance.
 """
 import csv
 import os
 import sys
 import click
-import azure.cosmos.cosmos_client as cosmos_client
+import json
+from azure.cosmos import CosmosClient
 
 DELIMITERS = {
     'CSV': ',',
     'TSV': '\t'
 }
 
-FILE_ENDINGS = ('.CSV', '.TSV')
+FILE_ENDINGS = ('.CSV', '.TSV', '.JSON')
 
 
-@click.version_option('1.0.0')
+@click.version_option('1.1.0')
 @click.group()
 def cadet():
     """
@@ -50,14 +50,14 @@ def cadet():
     required=True
     )
 @click.option(
-    '--type', '-t', 'type_',
-    help='The source file\'s type (Options: csv, tsv)',
+    '--file-type', '-t',
+    help='The source file\'s type (Options: csv, tsv, json)',
     required=True
 )
 @click.argument('source')
-def upload(source, type_, collection_name, database_name, primary_key, uri, connection_string):
+def upload(source, file_type, collection_name, database_name, primary_key, uri, connection_string):
     """
-    Given a source file `source` of type `type_`:
+    Given a source file `source` of type `file_type`:
         1. connects to the Cosmos DB instance using either
             (a) `primary_key` and `uri`
             OR
@@ -67,10 +67,10 @@ def upload(source, type_, collection_name, database_name, primary_key, uri, conn
     Assumes that the Cosmos DB subscription has both the database and the collection already
     made when running this tool.
     """
-    # Make sure it's a CSV or TSV
-    type_ = type_.upper()
-    if type_ not in DELIMITERS or not source.upper().endswith(FILE_ENDINGS):
-        raise click.BadParameter('We currently only support CSV and TSV uploads from Cadet')
+    file_type = file_type.upper()
+    # Make sure it's a CSV, TSV, or JSON
+    if file_type not in DELIMITERS and not source.upper().endswith(FILE_ENDINGS):
+        raise click.BadParameter('We currently only support CSV, TSV, and JSON uploads from Cadet')
 
     # You must have either the connection string OR (endpoint and key) to connect
     if (uri is None or primary_key is None) and (connection_string is None):
@@ -95,19 +95,18 @@ def upload(source, type_, collection_name, database_name, primary_key, uri, conn
             # ...Unless they don't provide a usable connection string
             raise click.BadParameter('The connection string is not properly formatted.')
 
-    database_link = 'dbs/' + database_name
-    collection_link = database_link + '/colls/' + collection_name
-
-    # Connect to Cosmos
+    # Connect to Cosmos, then to the database, then the container/collection
     try:
         client = get_cosmos_client(_connection_url, _auth)
+        database = client.get_database_client(database_name)
+        container = database.get_container_client(collection_name)
     except:
         raise click.BadParameter('Authentication failure to Azure Cosmos')
 
     # Read and upload at same time
     try:
         source_path = get_full_source_path(source)
-        read_and_upload(source_path, type_, client, collection_link)
+        read_and_upload(source_path, file_type, client, container)
     except FileNotFoundError as err:
         raise click.FileError(source, hint=err)
 
@@ -119,39 +118,71 @@ def get_cosmos_client(connection_url, auth):
     Connects to the Cosmos instance via the `connection_url` (authenticating with `auth`)
     and returns the cosmos_client
     """
-    return cosmos_client.CosmosClient(
-        url_connection=connection_url,
-        auth=auth
+    return CosmosClient(
+        url=connection_url,
+        credential=auth
     )
 
 
-def read_and_upload(source_path, file_type, client, collection_link):
+def read_and_upload(source_path, file_type, client, container):
     """
-    Reads the CSV `source` of type `file_type`, connects to the `client` to the
-    database-collection combination found in `collection_link`
+    Reads the `source` of type `file_type`, connects to the `client` to the
+    database-collection combination found in `container`
     """
-     # Stats read for percentage done
-    source_size = os.stat(source_path).st_size
-    click.echo('Source file total size is: %s bytes' % source_size)
+
     with open(source_path, 'r') as source_file:
         click.echo('Starting the upload')
-        document = {}
-        csv_reader = csv.reader(source_file, delimiter=DELIMITERS[file_type])
-        line_count = 0
-        with click.progressbar(length=source_size, show_percent=True) as status_bar:
-            for row in csv_reader:
-                if line_count == 0:
-                    csv_cols = row
-                    line_count += 1
-                else:
-                    for ind, col in enumerate(csv_cols):
-                        document[col] = row[ind]
+
+        # Stats read for percentage done
+        source_size = os.stat(source_path).st_size
+        click.echo('Source file total size is: %s bytes' % source_size)
+
+        # if CSV or TSV
+        if file_type in DELIMITERS.keys():
+            read_and_upload_csv(source_file, file_type, container, source_size)
+        else: # if JSON
+            read_and_upload_json(source_file, container, source_size)
+
+
+def read_and_upload_csv(source_file, file_type, container, source_size):
+    """
+    Handles the reading of the CSV/TSV files, then uploads them via the container link.
+    source_size is handed between the methods in order to communicate information to the
+    user and not for functionality.
+    """
+    csv_reader = csv.reader(source_file, delimiter=DELIMITERS[file_type])
+    line_count = 0
+    document = {}
+
+    with click.progressbar(length=source_size, show_percent=True) as status_bar:
+        for row in csv_reader:
+            if line_count == 0:
+                csv_cols = row
+                line_count += 1
+            else:
+                for ind, col in enumerate(csv_cols):
+                    document[col] = row[ind]
                     try:
-                        client.UpsertItem(collection_link, document)
+                        container.upsert_item(document)
                         status_bar.update(sys.getsizeof(row))
                     except:
                         raise click.ClickException('Upload failed')
         click.echo('Upload complete!')
+
+def read_and_upload_json(source_file, container, source_size):
+    """
+    Handles the reading of a JSON file, then uploads them via the container link.
+    source_size is handed between the methods in order to communicate information to the
+    user and not for functionality.
+    """
+    json_array = json.load(source_file)
+    with click.progressbar(length=len(json_array) , show_percent=True) as status_bar:
+        for item in json_array:
+            try:
+                container.upsert_item(item)
+                status_bar.update(sys.getsizeof(item))
+            except:
+                raise click.ClickException('Upload failed:', sys.exc_info())
 
 
 if __name__ == '__main__':

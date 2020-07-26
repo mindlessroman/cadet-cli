@@ -1,0 +1,20 @@
+[
+    {
+        "name": "Barnaby Flats",
+        "age": 10,
+        "city": "Boston",
+        "state": "MA"
+    },
+    {
+        "name": "Wilson Didgeridoo",
+        "age": 11,
+        "city": "New York",
+        "state": "NY"
+    },
+    {
+        "name": "Clyde Penderghast",
+        "age": 9,
+        "city": "Austin",
+        "state": "TX"
+    }
+]

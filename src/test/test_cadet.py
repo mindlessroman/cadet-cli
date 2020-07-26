@@ -15,9 +15,11 @@ from ..cadet import (
 
 GOOD_CSV = 'test.csv'
 GOOD_TSV = 'test.tsv'
+GOOD_JSON = 'test.json'
 
 CSV_TYPE = 'CSV'
 TSV_TYPE = 'TSV'
+JSON_TYPE = 'JSON'
 
 TXT_TEST_FILE = 'a.txt'
 CURR_DIRECTORY = os.path.dirname(__file__)
@@ -42,9 +44,9 @@ class MockClient:
 
     # pylint: disable=C0103
     # Reason: Using same method call as SDK
-    def UpsertItem(self, _collection_link, document):
+    def upsert_item(self, document):
         """
-        Mocks Azure Client's UpsertItem function
+        Mocks Azure CosmosDB ContainerProxy upsert_item()
         """
 
         self.upserted_docs.append(copy.copy(document))
@@ -65,11 +67,10 @@ class TestClass:
     """
 
     @mock.patch('src.cadet.get_full_source_path', autospec=True)
-    @mock.patch('src.cadet.get_cosmos_client', autospec=True)
-
+    @mock.patch('src.cadet.get_upload_client', autospec=True)
     # pylint: disable=R0201
     # Reason: R0201 makes pytest ignore test functions
-    def test_good_params_uri_pkey_csv(self, mock_get_cosmos_client, mock_get_full_source_path):
+    def test_good_params_uri_pkey_csv(self, mock_get_upload_client, mock_get_full_source_path):
         """
         Tests that, given all required options, including a primary Key and URI combo
         and a CSV file, the tool works as expected
@@ -77,7 +78,7 @@ class TestClass:
 
         mock_client = MockClient()
         mock_get_full_source_path.return_value = os.path.join(CURR_DIRECTORY, GOOD_CSV)
-        mock_get_cosmos_client.return_value = mock_client
+        mock_get_upload_client.return_value = mock_client
         result = RUNNER.invoke(
             upload, [GOOD_CSV, '--type', CSV_TYPE, '-d', TEST_DB,
                      '-c', TEST_COLLECTION, '-u', TEST_URI, '-k', TEST_KEY]
@@ -107,19 +108,19 @@ class TestClass:
         assert len(mock_client.upserted_docs) == 5
         assert result.exit_code == 0
 
-    @mock.patch('src.cadet.get_full_source_path', autospec=True)
-    @mock.patch('src.cadet.get_cosmos_client', autospec=True)
 
+    @mock.patch('src.cadet.get_full_source_path', autospec=True)
+    @mock.patch('src.cadet.get_upload_client', autospec=True)
     # pylint: disable=R0201
     # Reason: R0201 makes pytest ignore test functions
-    def test_good_params_conn_str_csv(self, mock_get_cosmos_client, mock_get_full_source_path):
+    def test_good_params_conn_str_csv(self, mock_get_upload_client, mock_get_full_source_path):
         """
         Tests that, given all required options, using a connection string and a CSV file,
         the tool works as expected
         """
 
         mock_client = MockClient()
-        mock_get_cosmos_client.return_value = mock_client
+        mock_get_upload_client.return_value = mock_client
         mock_get_full_source_path.return_value = os.path.join(CURR_DIRECTORY, GOOD_CSV)
         result = RUNNER.invoke(
             upload, [GOOD_CSV, '--type', CSV_TYPE, '--database-name', TEST_DB,
@@ -153,19 +154,19 @@ class TestClass:
         assert len(mock_client.upserted_docs) == 5
         assert result.exit_code == 0
 
-    @mock.patch('src.cadet.get_full_source_path', autospec=True)
-    @mock.patch('src.cadet.get_cosmos_client', autospec=True)
 
+    @mock.patch('src.cadet.get_full_source_path', autospec=True)
+    @mock.patch('src.cadet.get_upload_client', autospec=True)
     # pylint: disable=R0201
     # Reason: R0201 makes pytest ignore test functions
-    def test_good_params_uri_pkey_tsv(self, mock_get_cosmos_client, mock_get_full_source_path):
+    def test_good_params_uri_pkey_tsv(self, mock_get_upload_client, mock_get_full_source_path):
         """
         Tests that, given all required options, including a primary Key and URI combo
         and a TSV file, the tool works as expected
         """
 
         mock_client = MockClient()
-        mock_get_cosmos_client.return_value = mock_client
+        mock_get_upload_client.return_value = mock_client
         mock_get_full_source_path.return_value = os.path.join(CURR_DIRECTORY, GOOD_TSV)
         result = RUNNER.invoke(
             upload, [GOOD_TSV, '--type', TSV_TYPE, '-d', TEST_DB,
@@ -196,19 +197,19 @@ class TestClass:
         assert len(mock_client.upserted_docs) == 3
         assert result.exit_code == 0
 
-    @mock.patch('src.cadet.get_full_source_path', autospec=True)
-    @mock.patch('src.cadet.get_cosmos_client', autospec=True)
 
+    @mock.patch('src.cadet.get_full_source_path', autospec=True)
+    @mock.patch('src.cadet.get_upload_client', autospec=True)
     # pylint: disable=R0201
     # Reason: R0201 makes pytest ignore test functions
-    def test_good_params_conn_string_tsv(self, mock_get_cosmos_client, mock_get_full_source_path):
+    def test_good_params_conn_string_tsv(self, mock_get_upload_client, mock_get_full_source_path):
         """
         Tests that, given all required options, using a connection string and a TSV file,
         the tool works as expected
         """
 
         mock_client = MockClient()
-        mock_get_cosmos_client.return_value = mock_client
+        mock_get_upload_client.return_value = mock_client
         mock_get_full_source_path.return_value = os.path.join(CURR_DIRECTORY, GOOD_TSV)
         result = RUNNER.invoke(
             upload, [GOOD_TSV, '--type', TSV_TYPE, '--database-name', TEST_DB,
@@ -240,6 +241,7 @@ class TestClass:
         assert len(mock_client.upserted_docs) == 3
         assert result.exit_code == 0
 
+
     # pylint: disable=R0201
     # Reason: R0201 makes pytest ignore test functions
     def test_source_is_missing(self):
@@ -251,7 +253,8 @@ class TestClass:
                      '--collection-name', TEST_COLLECTION, '-u', TEST_URI, '-k', TEST_KEY]
             )
         assert result.exit_code != 0
-        assert 'Missing argument "SOURCE"' in result.output
+        assert 'Missing argument \'SOURCE\'' in result.output
+
 
     # pylint: disable=R0201
     # Reason: R0201 makes pytest ignore test functions
@@ -265,7 +268,8 @@ class TestClass:
                      '--collection-name', TEST_COLLECTION, '-u', TEST_URI, '-k', TEST_KEY]
             )
         assert result.exit_code != 0
-        assert 'We currently only support CSV and TSV uploads from Cadet' in result.output
+        assert 'We currently only support CSV, TSV, and JSON uploads from Cadet' in result.output
+
 
     # pylint: disable=R0201
     # Reason: R0201 makes pytest ignore test functions
@@ -279,7 +283,8 @@ class TestClass:
                      '-u', TEST_URI, '-k', TEST_KEY]
             )
         assert result.exit_code != 0
-        assert 'Missing option "--database-name"' in result.output
+        assert 'Missing option \'--database-name\'' in result.output
+
 
     # pylint: disable=R0201
     # Reason: R0201 makes pytest ignore test functions
@@ -293,7 +298,8 @@ class TestClass:
                      TEST_DB, '-u', TEST_URI, '-k', TEST_KEY]
             )
         assert result.exit_code != 0
-        assert 'Missing option "--collection-name"' in result.output
+        assert 'Missing option \'--collection-name\'' in result.output
+
 
     # pylint: disable=R0201
     # Reason: R0201 makes pytest ignore test functions
@@ -309,6 +315,7 @@ class TestClass:
         assert result.exit_code != 0
         assert 'REQUIRED: Connection string OR *both* a URI and a key' in result.output
 
+
     # pylint: disable=R0201
     # Reason: R0201 makes pytest ignore test functions
     def test_uri_absent_key_present(self):
@@ -323,6 +330,7 @@ class TestClass:
         assert result.exit_code != 0
         assert 'REQUIRED: Connection string OR *both* a URI and a key' in result.output
 
+
     # pylint: disable=R0201
     # Reason: R0201 makes pytest ignore test functions
     def test_pkey_absent_uri_present(self):
@@ -336,6 +344,7 @@ class TestClass:
             )
         assert result.exit_code != 0
         assert 'REQUIRED: Connection string OR *both* a URI and a key' in result.output
+
 
     # pylint: disable=R0201
     # Reason: R0201 makes pytest ignore test functions
@@ -354,20 +363,21 @@ class TestClass:
         assert result.exit_code != 0
         assert 'The connection string is not properly formatted' in result.output
 
-    @mock.patch('src.cadet.cosmos_client', autospec=True)
 
+    @mock.patch('src.cadet.CosmosClient', autospec=True)
     # pylint: disable=R0201
     # Reason: R0201 makes pytest ignore test functions
-    def test_cosmos_client_throws_error(self, mock_cosmos_client):
+    def test_cosmos_client_throws_error(self, mock_upload_client):
         """
-        Test that cosmos_client error throwing functionality, if connection to service fails
+        Test that upload_client error throwing functionality, if connection to service fails
         """
 
         mock_client = MockClient()
-        mock_cosmos_client.CosmosClient.side_effect = mock_client.CosmosClient
+        mock_upload_client.CosmosClient.side_effect = mock_client.CosmosClient
         result = RUNNER.invoke(
             upload, [GOOD_TSV, '--type', TSV_TYPE, '--database-name', TEST_DB,
                      '--collection-name', TEST_COLLECTION, '--connection-string', TEST_CONN_STRING]
             )
+
         assert result.exit_code != 0
         assert 'Authentication failure to Azure Cosmos' in result.output

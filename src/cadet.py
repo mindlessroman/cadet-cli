@@ -45,12 +45,12 @@ def cadet():
     required=True
     )
 @click.option(
-    '--collection-name', '-c', '--collection',
-    help='The collection to load the data into',
+    '--collection-name', '-c', '--collection', '--container', '--container-name',
+    help='The collection/container to load the data into',
     required=True
     )
 @click.option(
-    '--file-type', '-t',
+    '--file-type', '-t', '--type',
     help='The source file\'s type (Options: csv, tsv, json)',
     required=True
 )
@@ -69,7 +69,7 @@ def upload(source, file_type, collection_name, database_name, primary_key, uri, 
     """
     file_type = file_type.upper()
     # Make sure it's a CSV, TSV, or JSON
-    if file_type not in DELIMITERS and not source.upper().endswith(FILE_ENDINGS):
+    if not source.upper().endswith(FILE_ENDINGS):
         raise click.BadParameter('We currently only support CSV, TSV, and JSON uploads from Cadet')
 
     # You must have either the connection string OR (endpoint and key) to connect
@@ -97,37 +97,33 @@ def upload(source, file_type, collection_name, database_name, primary_key, uri, 
 
     # Connect to Cosmos, then to the database, then the container/collection
     try:
-        client = get_cosmos_client(_connection_url, _auth)
-        database = client.get_database_client(database_name)
-        container = database.get_container_client(collection_name)
+        container = get_upload_client(_connection_url, _auth, database_name, collection_name)
     except:
         raise click.BadParameter('Authentication failure to Azure Cosmos')
 
     # Read and upload at same time
     try:
         source_path = get_full_source_path(source)
-        read_and_upload(source_path, file_type, client, container)
+        read_and_upload(source_path, file_type, container)
     except FileNotFoundError as err:
         raise click.FileError(source, hint=err)
 
 def get_full_source_path(source):
     return os.path.join(os.path.dirname(__file__), source)
 
-def get_cosmos_client(connection_url, auth):
+def get_upload_client(connection_url, auth, database_name, container_name):
     """
     Connects to the Cosmos instance via the `connection_url` (authenticating with `auth`)
     and returns the cosmos_client
     """
-    return CosmosClient(
-        url=connection_url,
-        credential=auth
-    )
+    cosmos_client = CosmosClient(connection_url, auth)
+    database = cosmos_client.get_database_client(database_name)
+    return database.get_container_client(collection_name)
 
 
-def read_and_upload(source_path, file_type, client, container):
+def read_and_upload(source_path, file_type, container):
     """
-    Reads the `source` of type `file_type`, connects to the `client` to the
-    database-collection combination found in `container`
+    Reads the `source` of type `file_type`, connects combination found in `container`
     """
 
     with open(source_path, 'r') as source_file:
@@ -162,11 +158,12 @@ def read_and_upload_csv(source_file, file_type, container, source_size):
             else:
                 for ind, col in enumerate(csv_cols):
                     document[col] = row[ind]
-                    try:
-                        container.upsert_item(document)
-                        status_bar.update(sys.getsizeof(row))
-                    except:
-                        raise click.ClickException('Upload failed')
+
+                try:
+                    container.upsert_item(document)
+                    status_bar.update(sys.getsizeof(row))
+                except:
+                    raise click.ClickException('Upload failed')
         click.echo('Upload complete!')
 
 def read_and_upload_json(source_file, container, source_size):

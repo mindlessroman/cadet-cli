@@ -36,7 +36,7 @@ RUNNER = CliRunner()
 
 class MockClient:
     """
-    Class constructed to mock Azure CosmosClient connection and functions
+    Class constructed to mock Azure container_client connection and functions
     """
 
     def __init__(self):
@@ -54,11 +54,14 @@ class MockClient:
     # pylint: disable=C0103
     # Reason: Using same method call as SDK
     @classmethod
-    def CosmosClient(cls, url_connection, auth):
+    def get_container_client(cls, container_name):
         """
         Mocks Azure CosmosClient's authentication and connection process
         """
 
+        raise ConnectionError('Authentication failure to Azure Cosmos')
+
+    def CosmosClient(self, connection_url, _auth):
         raise ConnectionError('Authentication failure to Azure Cosmos')
 
 class TestClass:
@@ -68,9 +71,11 @@ class TestClass:
 
     @mock.patch('src.cadet.get_full_source_path', autospec=True)
     @mock.patch('src.cadet.get_upload_client', autospec=True)
+    @mock.patch('src.cadet.CosmosClient', autospec=True)
     # pylint: disable=R0201
     # Reason: R0201 makes pytest ignore test functions
-    def test_good_params_uri_pkey_csv(self, mock_get_upload_client, mock_get_full_source_path):
+    def test_good_params_uri_pkey_csv(self, mock_get_container_client, mock_get_full_source_path, mock_cosmosclient):
+    # def test_good_params_uri_pkey_csv(self, mock_get_upload_client, mock_get_full_source_path):
         """
         Tests that, given all required options, including a primary Key and URI combo
         and a CSV file, the tool works as expected
@@ -78,14 +83,17 @@ class TestClass:
 
         mock_client = MockClient()
         mock_get_full_source_path.return_value = os.path.join(CURR_DIRECTORY, GOOD_CSV)
-        mock_get_upload_client.return_value = mock_client
+        # mock_get_upload_client.return_value = mock_client
+        mock_get_container_client.return_value = mock_client.get_container_client
+        mock_cosmosclient.return_value = mock_client.CosmosClient
         result = RUNNER.invoke(
             upload, [GOOD_CSV, '--type', CSV_TYPE, '-d', TEST_DB,
                      '-c', TEST_COLLECTION, '-u', TEST_URI, '-k', TEST_KEY]
             )
         expected_keys = ['county', 'eq_site_limit', 'policyID', 'statecode']
-
         expected_values = list()
+
+        # print(mock_get_container_client.return_value.upserted_docs)
 
         # Expected values from the test.csv file
         expected_values.append(['119736', '498960', 'CLAY COUNTY', 'FL'])
@@ -241,6 +249,54 @@ class TestClass:
         assert len(mock_client.upserted_docs) == 3
         assert result.exit_code == 0
 
+    @mock.patch('src.cadet.get_full_source_path', autospec=True)
+    @mock.patch('src.cadet.get_upload_client', autospec=True)
+    # pylint: disable=R0201
+    # Reason: R0201 makes pytest ignore test functions
+    def test_good_params_conn_str_json(self, mock_get_upload_client, mock_get_full_source_path):
+        """
+        Tests that, given all required options, including a connection string,
+        and a JSON file, the tool works as expected
+        """
+        #TODO: fill in the method
+        mock_client = MockClient()
+        mock_get_upload_client.return_value = mock_client
+        mock_get_full_source_path.return_value = os.path.join(CURR_DIRECTORY, GOOD_TSV)
+        result = RUNNER.invoke(
+            upload, [GOOD_JSON, '--type', JSON_TYPE, '--database-name', TEST_DB,
+                     '--collection-name', TEST_COLLECTION, '--connection-string', TEST_CONN_STRING]
+            )
+
+        expected_values = list()
+        expected_values.append({
+            "name": "Barnaby Flats",
+            "age": 10,
+            "city": "Boston",
+            "state": "MA"
+        })
+        expected_values.append({
+            "name": "Wilson Didgeridoo",
+            "age": 11,
+            "city": "New York",
+            "state": "NY"
+        })
+        expected_values.append({
+            "name": "Clyde Penderghast",
+            "age": 9,
+            "city": "Austin",
+            "state": "TX"
+        })
+
+        assert len(mock_client.upserted_docs) == 3
+        # assert True
+
+    @mock.patch('src.cadet.get_full_source_path', autospec=True)
+    @mock.patch('src.cadet.get_upload_client', autospec=True)
+    # pylint: disable=R0201
+    # Reason: R0201 makes pytest ignore test functions
+    def test_good_params_uri_pkey_json(self, mock_get_upload_client, mock_get_full_source_path):
+        #TODO: fill in the method
+        assert True
 
     # pylint: disable=R0201
     # Reason: R0201 makes pytest ignore test functions
@@ -364,20 +420,23 @@ class TestClass:
         assert 'The connection string is not properly formatted' in result.output
 
 
-    @mock.patch('src.cadet.CosmosClient', autospec=True)
+    @mock.patch('src.cadet.CosmosClient', **{'return_value.CosmosClient.side_effect': ConnectionError()})
+    @mock.patch('src.cadet.get_full_source_path', autospec=True)
     # pylint: disable=R0201
     # Reason: R0201 makes pytest ignore test functions
-    def test_cosmos_client_throws_error(self, mock_upload_client):
+    def test_cosmos_client_throws_error(self, mock_upload_client, mock_get_full_source_path):
         """
         Test that upload_client error throwing functionality, if connection to service fails
         """
 
         mock_client = MockClient()
-        mock_upload_client.CosmosClient.side_effect = mock_client.CosmosClient
+        #mock_upload_client.CosmosClient.side_effect = mock.Mock(side_effect=ConnectionError)
+        mock_get_full_source_path.return_value = os.path.join(CURR_DIRECTORY, GOOD_TSV)
         result = RUNNER.invoke(
             upload, [GOOD_TSV, '--type', TSV_TYPE, '--database-name', TEST_DB,
-                     '--collection-name', TEST_COLLECTION, '--connection-string', TEST_CONN_STRING]
+                     '--collection-name', TEST_COLLECTION, '--uri', TEST_URI, '-k', TEST_KEY]
             )
 
+        print(result.output)
         assert result.exit_code != 0
         assert 'Authentication failure to Azure Cosmos' in result.output

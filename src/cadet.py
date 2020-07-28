@@ -78,32 +78,22 @@ def upload(source, file_type, collection_name, database_name, primary_key, uri, 
             'REQUIRED: Connection string OR *both* a URI and a key'
             )
     elif uri is not None and primary_key is not None:
-        _connection_url = uri
-        _auth = {'masterKey': primary_key}
-    elif connection_string is not None:
-        connection_str = connection_string.split(';')
-        _connection_url = connection_str[0].replace('AccountEndpoint=', '')
-
+        # Connect to Cosmos, then to the database, then the container/collection
         try:
-            # If someone provides the connection string, break it apart into its subcomponents
-            if 'AccountEndpoint=' not in connection_string or 'AccountKey=' not in connection_string:
-                raise click.BadParameter('The connection string is not properly formatted.')
-            connection_str = connection_string.split(';')
-            _connection_url = connection_str[0].replace('AccountEndpoint=', '')
-            _auth = {'masterKey': connection_str[1].replace('AccountKey=', '')}
+            cosmos_client = CosmosClient(uri, {'masterKey': primary_key})
+        except:
+            raise click.BadParameter('Authentication failure to Azure Cosmos')
+    elif connection_string is not None:
+        try:
+            cosmos_client = CosmosClient.from_connection_string(connection_string)
         except:
             # ...Unless they don't provide a usable connection string
             raise click.BadParameter('The connection string is not properly formatted.')
 
-    # Connect to Cosmos, then to the database, then the container/collection
-    try:
-        container = get_upload_client(_connection_url, _auth, database_name, collection_name)
-    except:
-        raise click.BadParameter('Authentication failure to Azure Cosmos')
-
     # Read and upload at same time
     try:
         source_path = get_full_source_path(source)
+        container = get_upload_client(cosmos_client, database_name, collection_name)
         read_and_upload(source_path, file_type, container)
     except FileNotFoundError as err:
         raise click.FileError(source, hint=err)
@@ -111,14 +101,16 @@ def upload(source, file_type, collection_name, database_name, primary_key, uri, 
 def get_full_source_path(source):
     return os.path.join(os.path.dirname(__file__), source)
 
-def get_upload_client(connection_url, auth, database_name, container_name):
+def get_upload_client(cosmos_client, database_name, container_name):
     """
-    Connects to the Cosmos instance via the `connection_url` (authenticating with `auth`)
-    and returns the cosmos_client
+    Connects to the Cosmos instance via passed in cosmos_client,
+    and returns the container's connection proxy for that
+    database-container
+    combination
     """
-    cosmos_client = CosmosClient(connection_url, auth)
+
     database = cosmos_client.get_database_client(database_name)
-    return database.get_container_client(collection_name)
+    return database.get_container_client(container_name)
 
 
 def read_and_upload(source_path, file_type, container):
@@ -180,6 +172,7 @@ def read_and_upload_json(source_file, container, source_size):
                 status_bar.update(sys.getsizeof(item))
             except:
                 raise click.ClickException('Upload failed:', sys.exc_info())
+        click.echo('Upload complete!')
 
 
 if __name__ == '__main__':
